@@ -99,6 +99,8 @@ or run:  $LAUNCHER
 First run notes:
   * The shell boots your own \`dsh\` and its web profile, so your existing
     sessions, plugins and credentials under ~/.dsh are used as-is.
-  * Configuration lives at ~/.config/dsh-electron/config.json and is created
-    on first use; the log is ~/.config/dsh-electron/dsh-electron.log.
+  * Settings come from the environment (DSH_BIN, DSH_ELECTRON_CWD,
+    DSH_ELECTRON_PORT, DSH_ELECTRON_OZONE, ...); there is no config file.
+    The only thing written is the log, at
+    ~/.config/dsh-electron/dsh-electron.log.
 EOF

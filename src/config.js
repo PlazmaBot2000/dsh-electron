@@ -1,12 +1,13 @@
 'use strict';
 
 /**
- * Path resolution, user configuration, and persisted window state.
+ * Path resolution and configuration.
  *
- * The shell deliberately owns almost no configuration: it finds the user's
+ * The shell deliberately owns no configuration file: it finds the user's
  * installed `dsh` CLI and boots that CLI's own web profile, so profiles,
  * plugins, sessions, and credentials stay exactly where the CLI keeps them.
- * The few knobs here exist to point the shell at a non-default install.
+ * The handful of knobs that remain are read from the environment, which keeps
+ * the shell stateless — nothing is written except the log.
  */
 
 const fs = require('node:fs');
@@ -15,17 +16,16 @@ const path = require('node:path');
 
 const APP_ROOT = path.join(__dirname, '..');
 
-/** Directory holding user configuration and state, honouring XDG. */
-function configDir() {
+/** The one directory the shell owns, honouring XDG_CONFIG_HOME. */
+function dataDir() {
   const base = process.env.XDG_CONFIG_HOME && process.env.XDG_CONFIG_HOME !== ''
     ? process.env.XDG_CONFIG_HOME
     : path.join(os.homedir(), '.config');
   return path.join(base, 'dsh-electron');
 }
 
-const CONFIG_FILE = path.join(configDir(), 'config.json');
-const STATE_FILE = path.join(configDir(), 'window-state.json');
-const LOG_FILE = path.join(configDir(), 'dsh-electron.log');
+const DATA_DIR = dataDir();
+const LOG_FILE = path.join(DATA_DIR, 'dsh-electron.log');
 
 /** Candidate `dsh` executables, in the order a user would expect them found. */
 function dshCandidates() {
@@ -103,25 +103,6 @@ function resolveDshCommand(dshBin, nodeBin) {
   return { command: dshBin, args: [], kind: 'executable' };
 }
 
-function readJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(file, value) {
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8');
-    fs.renameSync(tmp, file);
-  } catch {
-    /* State persistence is best-effort by design. */
-  }
-}
-
 /** Default working directory for the runtime, matching a normal CLI launch. */
 function defaultWorkingDirectory() {
   const home = os.homedir();
@@ -134,67 +115,74 @@ function defaultWorkingDirectory() {
   return home;
 }
 
+/** A positive integer from the environment, or the fallback. */
+function envInt(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
 /**
- * Effective configuration: defaults, then the user's config.json.
+ * Device scale factor to force on Chromium, as a string, or null to let the
+ * desktop decide.
+ *
+ * The default is 1: the harness is a text-dense interface, and a 1:1 pixel
+ * mapping is what makes it read crisply on a scaled panel rather than being
+ * blown up by the compositor. `DSH_ELECTRON_SCALE=auto` hands the choice back
+ * to the desktop, and any positive number sets the scale directly.
+ */
+function envScaleFactor() {
+  const raw = (process.env.DSH_ELECTRON_SCALE ?? '1').trim().toLowerCase();
+  if (raw === '' || raw === 'auto') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? String(value) : null;
+}
+
+/**
+ * Effective configuration, read entirely from the environment.
+ *
  * @returns {{dshBin: string|null, nodeBin: string|null, command: object|null,
- *   workingDirectory: string, host: string, port: number, extraArgs: string[],
- *   openDevTools: boolean, showTray: boolean, logLevel: string}}
+ *   dshHome: string|null, workingDirectory: string, host: string, port: number,
+ *   extraArgs: string[], openDevTools: boolean, showTray: boolean,
+ *   logLevel: string, scaleFactor: string|null}}
  */
 function loadConfig() {
-  const user = readJson(CONFIG_FILE, {});
-  const dshBin = findDshBin(user.dshBin ?? process.env.DSH_BIN ?? null);
+  const dshBin = findDshBin(process.env.DSH_BIN ?? null);
   const nodeBin = findNodeBin();
 
-  const envArgs = (process.env.DSH_ELECTRON_ARGS ?? '')
+  const extraArgs = (process.env.DSH_ELECTRON_ARGS ?? '')
     .split(' ')
     .map((value) => value.trim())
     .filter((value) => value !== '');
 
   return {
-    configFile: CONFIG_FILE,
-    stateFile: STATE_FILE,
     logFile: LOG_FILE,
     appRoot: APP_ROOT,
     dshBin,
     nodeBin,
     command: resolveDshCommand(dshBin, nodeBin),
-    dshHome: user.dshHome ?? process.env.DSH_HOME ?? null,
-    workingDirectory: user.workingDirectory ?? defaultWorkingDirectory(),
-    host: user.host ?? '127.0.0.1',
+    dshHome: process.env.DSH_HOME ?? null,
+    workingDirectory: process.env.DSH_ELECTRON_CWD ?? defaultWorkingDirectory(),
+    host: process.env.DSH_ELECTRON_HOST ?? '127.0.0.1',
     // A stable port keeps the browser origin constant, which is what
     // localStorage is keyed on; `choosePort` falls back to an OS-assigned free
-    // port only when this one is already taken.
-    port: Number.isInteger(user.port) ? user.port : 3080,
-    extraArgs: Array.isArray(user.extraArgs) ? user.extraArgs : envArgs,
-    openDevTools: user.openDevTools === true,
-    showTray: user.showTray !== false,
-    logLevel: user.logLevel ?? (process.env.DSH_ELECTRON_DEBUG === '1' ? 'debug' : 'info'),
+    // port only when this one is already taken. Port 0 always asks the OS.
+    port: envInt('DSH_ELECTRON_PORT', 3080),
+    extraArgs,
+    openDevTools: process.env.DSH_ELECTRON_DEVTOOLS === '1',
+    showTray: process.env.DSH_ELECTRON_TRAY !== '0',
+    logLevel: process.env.DSH_ELECTRON_DEBUG === '1' ? 'debug' : 'info',
+    scaleFactor: envScaleFactor(),
   };
-}
-
-/** Persisted window geometry, validated enough to be safe to apply. */
-function loadWindowState() {
-  const state = readJson(STATE_FILE, {});
-  const bounds = state.bounds ?? {};
-  const usable = ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(bounds[key]));
-  return {
-    bounds: usable ? bounds : null,
-    maximized: state.maximized === true,
-  };
-}
-
-function saveWindowState(value) {
-  writeJson(STATE_FILE, value);
 }
 
 module.exports = {
   APP_ROOT,
+  DATA_DIR,
   LOG_FILE,
-  CONFIG_FILE,
-  STATE_FILE,
   loadConfig,
-  loadWindowState,
-  saveWindowState,
+  envScaleFactor,
   findDshBin,
   findNodeBin,
   defaultWorkingDirectory,

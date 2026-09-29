@@ -98,7 +98,6 @@
         <dt>Harness</dt><dd id="dsh-bin">—</dd>
         <dt>Working dir</dt><dd id="cwd">—</dd>
         <dt>Log file</dt><dd id="log-file">—</dd>
-        <dt>Config</dt><dd id="config-file">—</dd>
       </dl>
 
       <div class="actions">
@@ -108,8 +107,8 @@
       </div>
 
       <p class="hint">
-        You can also set <code>dshBin</code> in the config file when <code>dsh</code>
-        lives somewhere unusual, then press “Try again”.
+        If <code>dsh</code> lives somewhere unusual, start the shell with
+        <code>DSH_BIN=/path/to/dsh</code>, then press “Try again”.
       </p>
     </div>
 
@@ -143,7 +142,6 @@
             setText('dsh-bin', info.dshBin || '(not found)');
             setText('cwd', info.workingDirectory || '—');
             setText('log-file', info.logFile || '—');
-            setText('config-file', info.configFile || '—');
           } catch (error) {
             setText('message', 'Could not read diagnostics: ' + error.message);
           }

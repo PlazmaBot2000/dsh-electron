@@ -71,12 +71,34 @@ const onWaylandSession = typeof process.env.WAYLAND_DISPLAY === 'string' && proc
 const ozoneBackend = app.commandLine.getSwitchValue('ozone-platform')
   || (onWaylandSession ? 'wayland' : 'x11');
 
-/** Only the X11 backend lets the application choose where its window sits. */
-const positionRestorable = ozoneBackend !== 'wayland';
-
 if (process.env.DSH_ELECTRON_DISABLE_GPU === '1') {
   app.disableHardwareAcceleration();
 }
+
+// Render at a 1:1 pixel scale unless the desktop is asked otherwise.
+//
+// Unlike the Ozone backend, this switch is honoured when appended from here:
+// Chromium reads the scale factor when the first screen is measured, not during
+// early process startup. Putting it here means `npm start` gets the same
+// rendering as the launcher.
+const scaleFactor = configModule.envScaleFactor();
+if (scaleFactor !== null) {
+  app.commandLine.appendSwitch('force-device-scale-factor', scaleFactor);
+}
+
+// ── Identity and storage location ─────────────────────────────────────────────
+//
+// Chromium keeps a profile of its own (cache, cookies, localStorage) and derives
+// its location from the application name, which would scatter a second,
+// unrelated directory next to the shell's. Redirecting it here means everything
+// the app ever writes lives under one removable directory.
+//
+// This runs before the single-instance lock on purpose: the lock's socket and
+// files live inside that profile directory, so a later `setPath` would leave
+// them behind in the default location.
+app.setName(APP_NAME);
+app.setPath('userData', path.join(configModule.DATA_DIR, 'chromium'));
+if (process.platform === 'linux') app.setAppUserModelId('dev.dsh.harness');
 
 // ── Single instance ───────────────────────────────────────────────────────────
 // A second launch must focus the running window rather than boot a second
@@ -98,15 +120,12 @@ function bootstrap() {
   config = configModule.loadConfig();
   logger = new Logger(config.logFile, { level: config.logLevel });
   logger.info('app', `${APP_NAME} shell starting (electron ${process.versions.electron}, node ${process.versions.node})`);
-  logger.info('app', `config: ${config.configFile}`);
+  logger.info('app', 'config: environment only (no config file)');
   logger.info('app', `dsh: ${config.dshBin ?? '(not found)'}`);
   logger.info('app', `ozone backend: ${ozoneBackend} (session: ${onWaylandSession ? 'wayland' : 'x11'})`);
   if (config.dshBin === null) {
     logger.error('app', 'no `dsh` executable was found');
   }
-
-  app.setName(APP_NAME);
-  if (process.platform === 'linux') app.setAppUserModelId('dev.dsh.harness');
 
   app.whenReady().then(onReady).catch((error) => {
     logger.error('app', `startup failed: ${error.stack ?? error.message}`);
@@ -144,41 +163,20 @@ function appIconPath() {
 // ── Window ────────────────────────────────────────────────────────────────────
 
 /**
- * Keep saved geometry on-screen.
+ * Where the window lives when it starts.
  *
- * Only size is validated on Wayland: the compositor chooses placement, so a
- * stored x/y would be ignored at best and misleading at worst.
+ * The shell keeps no window state on purpose: remembering geometry means
+ * writing a file while the user drags the window, and a remembered position is
+ * exactly the thing that strands a window off-screen after a monitor changes.
+ * The compositor or window manager is the right owner of placement, and a fixed
+ * starting size is the part worth guaranteeing.
  */
-function windowOptionsFromState() {
-  const saved = configModule.loadWindowState();
-  const bounds = saved.bounds;
-  const options = {
-    width: 1280,
-    height: 860,
-    minWidth: 640,
-    minHeight: 480,
-  };
-
-  if (bounds !== null && Number.isFinite(bounds.width) && Number.isFinite(bounds.height)) {
-    options.width = Math.max(640, Math.round(bounds.width));
-    options.height = Math.max(480, Math.round(bounds.height));
-  }
-
-  if (positionRestorable && bounds !== null && Number.isFinite(bounds.x) && Number.isFinite(bounds.y)) {
-    const visible = screen.getAllDisplays().some((display) => {
-      const area = display.workArea;
-      const overlapX = Math.min(bounds.x + options.width, area.x + area.width) - Math.max(bounds.x, area.x);
-      const overlapY = Math.min(bounds.y + options.height, area.y + area.height) - Math.max(bounds.y, area.y);
-      return overlapX > 80 && overlapY > 80;
-    });
-    if (visible) {
-      options.x = Math.round(bounds.x);
-      options.y = Math.round(bounds.y);
-    }
-  }
-
-  return { options, maximized: saved.maximized };
-}
+const WINDOW_DEFAULTS = {
+  width: 1280,
+  height: 860,
+  minWidth: 640,
+  minHeight: 480,
+};
 
 /**
  * Log where the window actually ended up.
@@ -189,15 +187,13 @@ function windowOptionsFromState() {
  */
 function logWindowGeometry(reason) {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
-  const area = screen.getPrimaryDisplay().workArea;
-  logger.info('window', `${reason}: visible=${mainWindow.isVisible()} bounds=${JSON.stringify(mainWindow.getBounds())} workArea=${JSON.stringify(area)}`);
+  const display = screen.getPrimaryDisplay();
+  logger.info('window', `${reason}: visible=${mainWindow.isVisible()} scale=${display.scaleFactor} bounds=${JSON.stringify(mainWindow.getBounds())} workArea=${JSON.stringify(display.workArea)}`);
 }
 
 function createWindow() {
-  const { options, maximized } = windowOptionsFromState();
-
   mainWindow = new BrowserWindow({
-    ...options,
+    ...WINDOW_DEFAULTS,
     show: false,
     title: APP_NAME,
     backgroundColor: '#1f1f28',
@@ -216,8 +212,6 @@ function createWindow() {
       spellcheck: true,
     },
   });
-
-  if (maximized) mainWindow.maximize();
 
   // Show on a first paint, but never depend on one: `ready-to-show` does not
   // fire if the compositor never delivers a frame (seen here under XWayland
@@ -280,9 +274,6 @@ function wireWindowEvents() {
     }
   });
 
-  mainWindow.on('resize', persistSoon);
-  mainWindow.on('move', persistSoon);
-
   // Shell actions need a home inside the window itself: this desktop exposes no
   // tray host, and the harness owns the whole client area, so the title bar
   // cannot carry a menu. A right-click menu reaches everything either way.
@@ -300,7 +291,6 @@ function wireWindowEvents() {
   });
 
   mainWindow.on('close', (event) => {
-    persist();
     // Closing the window quits the app unless a tray icon keeps it resident.
     if (!quitting && config.showTray && tray !== null) {
       event.preventDefault();
@@ -311,25 +301,6 @@ function wireWindowEvents() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-}
-
-let persistTimer = null;
-function persistSoon() {
-  if (persistTimer !== null) clearTimeout(persistTimer);
-  persistTimer = setTimeout(persist, 400);
-  persistTimer.unref?.();
-}
-
-function persist() {
-  if (mainWindow === null || mainWindow.isDestroyed()) return;
-  const maximized = mainWindow.isMaximized();
-  const current = maximized ? mainWindow.getNormalBounds() : mainWindow.getBounds();
-  // Wayland will not honour position, so storing it would only be noise.
-  configModule.saveWindowState(
-    !positionRestorable
-      ? { bounds: { width: current.width, height: current.height }, maximized }
-      : { bounds: current, maximized },
-  );
 }
 
 function isHarnessUrl(url) {
@@ -536,7 +507,7 @@ function showWorkspaceInfo() {
     type: 'info',
     title: 'Working Directory',
     message: config.workingDirectory,
-    detail: `Edit ${config.configFile} to change it.`,
+    detail: 'Set DSH_ELECTRON_CWD to change it.',
     buttons: ['OK'],
   });
 }
@@ -554,11 +525,6 @@ function runAction(action) {
       return;
     case 'reload': return void reloadWindow();
     case 'log': return void shell.showItemInFolder(config.logFile);
-    case 'config':
-      shell.openPath(config.configFile).then((error) => {
-        if (error) logger.warn('shell', `could not open config: ${error}`);
-      });
-      return;
     case 'workspace': return void showWorkspaceInfo();
     case 'status': return void showStatus();
     case 'about': return void showAbout();
@@ -591,7 +557,6 @@ function buildActionMenuTemplate() {
     { label: 'Reload Window', accelerator: 'F5', click: () => runAction('reload') },
     { type: 'separator' },
     { label: 'Show Log File', accelerator: 'Ctrl+Shift+L', click: () => runAction('log') },
-    { label: 'Open Config File', click: () => runAction('config') },
     { label: 'Working Directory…', click: () => runAction('workspace') },
     { label: 'Status…', click: () => runAction('status') },
     { label: 'About', click: () => runAction('about') },
@@ -725,14 +690,12 @@ function registerIpc() {
     dshBin: config.dshBin,
     workingDirectory: config.workingDirectory,
     logFile: config.logFile,
-    configFile: config.configFile,
   }));
 
   ipcMain.handle('dsh:last-failure', async () => ({
     failure: lastFailure,
     logTail: logger.tail(40),
     logFile: config.logFile,
-    configFile: config.configFile,
     dshBin: config.dshBin,
     workingDirectory: config.workingDirectory,
   }));

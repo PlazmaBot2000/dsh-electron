@@ -200,7 +200,7 @@ class RuntimeManager extends EventEmitter {
       const error = new RuntimeError(
         'The `dsh` command was not found.',
         'missing-dsh',
-        'Install it with `npm install -g @deepseek-ai/dsh`, or set "dshBin" in config.json.',
+        'Install it with `npm install -g @deepseek-ai/dsh`, or point the shell at it with DSH_BIN.',
       );
       this.emit('failed', error);
       return Promise.reject(error);

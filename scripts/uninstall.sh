@@ -2,9 +2,9 @@
 #
 # Remove what install.sh created.
 #
-# Deliberately additive-only: user configuration and the log under
-# ~/.config/dsh-electron are left in place, because they hold the shell's
-# window state and diagnostics rather than anything the installer owns.
+# Deliberately additive-only: the log under ~/.config/dsh-electron is left in
+# place, because it is the only record of what went wrong in past runs. The
+# shell keeps no other state.
 
 set -euo pipefail
 
@@ -28,5 +28,5 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 echo
-echo "Done. Your configuration was kept at ~/.config/dsh-electron"
+echo "Done. The log was kept at ~/.config/dsh-electron"
 echo "(remove that directory by hand if you also want to discard it)."

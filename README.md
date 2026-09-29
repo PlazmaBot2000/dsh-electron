@@ -45,7 +45,8 @@ This shell turns that into **one window on the dock**. It knows the URL because 
 |  **Real system window** | Native title bar with working minimize/maximize/close, drawn and themed by your window manager — not an HTML imitation |
 | 🧩 **Zero divergence** | Uses your installed `dsh` and its `web` profile: same sessions, plugins, skills, and credentials as the CLI |
 | 🩺 **Supervised runtime** | Reads the authenticated URL from the harness, health-checks it, restarts a crashed harness with backoff, and reports *why* it gave up |
-| 💾 **Window memory** | Size, position and maximized state return on next launch; stale off-screen geometry is detected and discarded |
+| 🧹 **No config files** | Nothing to learn and nothing to clean up: settings come from the environment, and the only files written are the log and Chromium's own profile, both under one directory |
+| 🔍 **Pixel-exact text** | Scale factor is pinned to 1:1 by default, so the dense interface renders crisp rather than compositor-upscaled — `DSH_ELECTRON_SCALE=auto` gives that back |
 | 📂 **Native folder picker** | The harness's directory chooser opens the real OS dialog through a single, minimal IPC seam |
 | ⌨️ **Keyboard-first** | No menu bar stealing vertical space; every shell action has a shortcut and a right-click entry |
 | 🔒 **Single instance** | Launching again focuses the existing window instead of starting a second server |
@@ -95,46 +96,42 @@ There is deliberately **no application menu bar** — Electron would draw one in
 | `Ctrl+Shift+L` | Reveal the log file |
 | `Ctrl+Q` | Quit |
 
-**Right-click** any empty part of the interface for the full action menu (Restart, Status, Working Directory, Config, About, Quit…). Editable fields and text selections are left to the harness itself.
+**Right-click** any empty part of the interface for the full action menu (Restart, Status, Working Directory, About, Quit…). Editable fields and text selections are left to the harness itself.
 
 ## Configuration
 
-Optional. The shell works with zero setup. Create `~/.config/dsh-electron/config.json` to change anything:
+There is none to learn — the shell reads **no config file**. It works out of the box: it finds your `dsh`, picks a working directory, and binds a stable port. Everything is overridable through the environment when you need it:
 
-```jsonc
-{
-  "workingDirectory": "~/AI_workspace", // where the harness is spawned (its default cwd)
-  "host": "127.0.0.1",                  // bind address for `dsh web`
-  "port": 3080,                         // stable origin keeps localStorage intact
-  "dshBin": null,                       // absolute path to `dsh` if auto-discovery fails
-  "dshHome": null,                      // DSH_HOME for the harness (separate profile)
-  "extraArgs": [],                      // appended to `dsh web ...` argv
-  "showTray": true,                     // tray icon when the desktop supports one
-  "openDevTools": false,                // open dev tools on every start
-  "logLevel": "info"                    // "debug" for verbose startup
-}
+| Variable | Default | Effect |
+|---|---|---|
+| `DSH_BIN` | auto | Absolute path to `dsh`. Auto-discovery searches `PATH`, `~/.npm-global/bin`, `~/.local/bin`, `/usr/local/bin`, `/usr/bin` |
+| `DSH_NODE_BIN` | auto | Node binary used to run a `.js` `dsh` entry |
+| `DSH_HOME` | `~/.dsh` | Harness home — point at a separate profile |
+| `DSH_ELECTRON_CWD` | `~/AI_workspace`, else `~` | Working directory the harness is spawned in |
+| `DSH_ELECTRON_HOST` | `127.0.0.1` | Bind address for `dsh web` |
+| `DSH_ELECTRON_PORT` | `3080` | A stable port keeps the browser origin constant, which is what localStorage is keyed on. `0` always asks the OS |
+| `DSH_ELECTRON_ARGS` | — | Extra arguments appended to `dsh web …` (space-separated argv, never a shell string) |
+| `DSH_ELECTRON_OZONE` | `x11` on Wayland | `x11` for real WM decorations, `wayland` for the native path |
+| `DSH_ELECTRON_BIN` | auto | Which Electron binary to run |
+| `DSH_ELECTRON_DISABLE_GPU` | — | `1` turns off hardware acceleration |
+| `DSH_ELECTRON_TRAY` | enabled | `0` disables the tray icon |
+| `DSH_ELECTRON_DEVTOOLS` | off | `1` opens dev tools on every start |
+| `DSH_ELECTRON_DEBUG` | off | `1` logs at debug level |
+| `DSH_ELECTRON_SCALE` | `1` | Device scale factor forced on Chromium. The default pins it to 1:1 so the text-dense interface renders crisply instead of being blown up by the compositor; `auto` hands the choice back to the desktop, a number (`1.5`, `2`) sets it directly |
+| `XDG_CONFIG_HOME` | `~/.config` | Relocates everything the shell writes |
+
+If `DSH_ELECTRON_PORT` is already taken, the shell does not fail — it asks the OS for a free port and reads the real one back from the harness.
+
+### What it writes
+
+Everything lives in `~/.config/dsh-electron/` and nowhere else:
+
+```
+dsh-electron.log    the shell's own log
+chromium/           Chromium's profile (cache, cookies, localStorage)
 ```
 
-| Key | Default | Notes |
-|---|---|---|
-| `workingDirectory` | `~/AI_workspace`, else `~` | The harness's own sessions live under `DSH_HOME`; this is just the launch cwd |
-| `host` / `port` | `127.0.0.1` / `3080` | If the port is taken, the shell falls back to an OS-assigned one instead of failing |
-| `dshBin` | auto | Searches `PATH`, `~/.npm-global/bin/dsh`, `~/.local/bin/dsh`, `/usr/local/bin`, `/usr/bin` |
-| `extraArgs` | `[]` | Passed verbatim as argv — never through a shell |
-
-### Environment variables
-
-| Variable | Effect |
-|---|---|
-| `DSH_ELECTRON_BIN` | Force a specific Electron binary |
-| `DSH_ELECTRON_OZONE` | `x11` (default on Wayland, real WM decorations) or `wayland` (native) |
-| `DSH_ELECTRON_DISABLE_GPU` | `1` disables hardware acceleration (troubleshooting) |
-| `DSH_ELECTRON_DEBUG` | `1` sets `logLevel: debug` |
-| `DSH_BIN` / `DSH_NODE_BIN` / `DSH_HOME` | Same meaning as the config keys |
-| `DSH_ELECTRON_ARGS` | Space-separated extra `dsh web` arguments |
-| `XDG_CONFIG_HOME` | Relocates config, window state and log |
-
-State lives in `~/.config/dsh-electron/`: `config.json`, `window-state.json`, `dsh-electron.log`.
+No `config.json`, no window-state file. The window deliberately does not remember its geometry: doing so means writing a file on every drag, and a remembered position is exactly what strands a window off-screen after a monitor change. Placement belongs to the window manager. Deleting `~/.config/dsh-electron/` removes every trace of the app.
 
 ## How it works
 
@@ -178,12 +175,11 @@ So on a Wayland session the launcher passes `--ozone-platform=x11`, and the wind
 
 | Symptom | Fix |
 |---|---|
-| "The `dsh` command was missing" | `npm install -g @deepseek-ai/dsh`, or set `dshBin` in config |
+| "The `dsh` command was missing" | `npm install -g @deepseek-ai/dsh`, or point at it with `DSH_BIN` |
 | Window never appears | Read `~/.config/dsh-electron/dsh-electron.log`; try `DSH_ELECTRON_DISABLE_GPU=1` |
 | Blank/garbled rendering under XWayland | `DSH_ELECTRON_OZONE=wayland` (you lose WM decorations but keep the app) |
-| Port 3080 already used | Automatic fallback to a free port; set `"port": 0` to always ask the OS |
+| Port 3080 already used | Automatic fallback to a free port; `DSH_ELECTRON_PORT=0` always asks the OS |
 | No tray icon | Your desktop lacks a StatusNotifier host (stock GNOME does). Everything remains reachable via shortcuts and right-click |
-| Window opens off-screen (multi-monitor) | Delete `~/.config/dsh-electron/window-state.json` |
 | Something else | `DSH_ELECTRON_DEBUG=1 ./bin/dsh-electron`, then open an issue with the log tail |
 
 ## Development
@@ -200,7 +196,7 @@ Layout — one concern per file, no framework, no build step:
 bin/dsh-electron      launcher: finds Electron, picks the Ozone backend
 src/main.js           window, menus, shortcuts, tray, IPC, lifecycle
 src/runtime.js        spawns and supervises `dsh web`
-src/config.js         discovery, config.json, window state
+src/config.js         discovery and environment settings
 src/logger.js         append-only log with a tail() for the error screen
 src/preload.js        the entire renderer↔main surface (two namespaces, no fs)
 src/renderer/         loading + error screens (plain HTML)
