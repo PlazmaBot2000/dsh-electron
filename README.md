@@ -13,6 +13,8 @@
 
 A native desktop application for [DeepSeek Harness](https://www.npmjs.com/package/@deepseek-ai/dsh) (`dsh`). It opens the harness in a window, supervises the local `dsh web` runtime for you.
 
+**English** · [Русский](README.ru.md)
+
 ---
 
 ## Contents
