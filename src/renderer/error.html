@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+    <title>DeepSeek Harness — startup problem</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: #0f1115;
+        color: #e6e8ee;
+        font-family: system-ui, -apple-system, "Segoe UI", Cantarell, sans-serif;
+        font-size: 14px;
+        display: flex;
+        justify-content: center;
+        padding: 40px 24px;
+        overflow-y: auto;
+      }
+      .card { width: 100%; max-width: 820px; }
+      .head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+      .badge {
+        flex: none;
+        width: 44px; height: 44px; border-radius: 12px;
+        background: rgba(239, 68, 68, 0.14);
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        display: grid; place-items: center;
+        font-size: 22px; color: #f87171;
+      }
+      h1 { margin: 0 0 6px; font-size: 19px; font-weight: 600; }
+      .message { margin: 0; color: #cbd2e0; line-height: 1.55; }
+      h2 {
+        font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+        color: #8b93a7; margin: 26px 0 8px; font-weight: 600;
+      }
+      pre {
+        margin: 0;
+        background: #14171d;
+        border: 1px solid #232838;
+        border-radius: 10px;
+        padding: 14px;
+        font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.6;
+        color: #b9c1d4;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 260px;
+        overflow: auto;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+      dt { color: #8b93a7; }
+      dd { margin: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; -webkit-user-select: text; user-select: text; word-break: break-all; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+      button {
+        appearance: none;
+        border: 1px solid #2d3446;
+        background: #1c2130;
+        color: #e6e8ee;
+        padding: 9px 16px;
+        border-radius: 9px;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      button:hover { background: #232a3c; border-color: #3a4159; }
+      button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+      button.primary:hover { background: #1d4ed8; border-color: #1d4ed8; }
+      button:disabled { opacity: 0.55; cursor: default; }
+      .hint { color: #667085; font-size: 12px; margin-top: 16px; line-height: 1.6; }
+      code { background: #1c2130; padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="head">
+        <div class="badge">!</div>
+        <div>
+          <h1 id="title">The harness could not start</h1>
+          <p class="message" id="message">No further detail was reported.</p>
+        </div>
+      </div>
+
+      <div id="detail-section" hidden>
+        <h2>Reported output</h2>
+        <pre id="detail"></pre>
+      </div>
+
+      <h2>Log</h2>
+      <pre id="log">Loading…</pre>
+
+      <h2>Environment</h2>
+      <dl>
+        <dt>Harness</dt><dd id="dsh-bin">—</dd>
+        <dt>Working dir</dt><dd id="cwd">—</dd>
+        <dt>Log file</dt><dd id="log-file">—</dd>
+        <dt>Config</dt><dd id="config-file">—</dd>
+      </dl>
+
+      <div class="actions">
+        <button class="primary" id="retry">Try again</button>
+        <button id="open-log">Open log file</button>
+        <button id="quit">Quit</button>
+      </div>
+
+      <p class="hint">
+        You can also set <code>dshBin</code> in the config file when <code>dsh</code>
+        lives somewhere unusual, then press “Try again”.
+      </p>
+    </div>
+
+    <script>
+      (function () {
+        const desktop = window.__DSH_DESKTOP__;
+
+        function setText(id, value) {
+          const node = document.getElementById(id);
+          if (node && value) node.textContent = value;
+        }
+
+        async function load() {
+          if (!desktop) {
+            setText('message', 'The desktop bridge is unavailable in this window.');
+            return;
+          }
+          try {
+            const info = await desktop.lastFailure();
+            const failure = info.failure || {};
+            setText('title', failure.title || 'The harness could not start');
+            setText('message', failure.message || 'No further detail was reported.');
+
+            const detail = (failure.detail || '').trim();
+            if (detail !== '') {
+              document.getElementById('detail-section').hidden = false;
+              setText('detail', detail);
+            }
+
+            setText('log', info.logTail || '(empty)');
+            setText('dsh-bin', info.dshBin || '(not found)');
+            setText('cwd', info.workingDirectory || '—');
+            setText('log-file', info.logFile || '—');
+            setText('config-file', info.configFile || '—');
+          } catch (error) {
+            setText('message', 'Could not read diagnostics: ' + error.message);
+          }
+        }
+
+        const retry = document.getElementById('retry');
+        retry.addEventListener('click', async () => {
+          retry.disabled = true;
+          retry.textContent = 'Starting…';
+          try {
+            await desktop.restartRuntime();
+          } catch (error) {
+            retry.disabled = false;
+            retry.textContent = 'Try again';
+            setText('message', 'Retry failed: ' + error.message);
+          }
+        });
+
+        document.getElementById('open-log').addEventListener('click', () => desktop.openLog());
+        document.getElementById('quit').addEventListener('click', () => desktop.quit());
+
+        load();
+      })();
+    </script>
+  </body>
+</html>

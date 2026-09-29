@@ -1,0 +1,40 @@
+{
+  "name": "dsh-electron",
+  "productName": "DeepSeek Harness",
+  "version": "1.0.0",
+  "description": "Desktop shell for DeepSeek Harness: a real window over the local `dsh web` runtime, with system decorations and a supervised lifecycle.",
+  "main": "src/main.js",
+  "license": "MIT",
+  "author": "PlazmaBot2000",
+  "homepage": "https://github.com/PlazmaBot2000/dsh-electron#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PlazmaBot2000/dsh-electron.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PlazmaBot2000/dsh-electron/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "harness",
+    "electron",
+    "desktop",
+    "wayland",
+    "ai-agent"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "electron .",
+    "start:system": "./bin/dsh-electron",
+    "start:debug": "DSH_ELECTRON_DEBUG=1 ./bin/dsh-electron",
+    "check": "node --check src/main.js && node --check src/config.js && node --check src/runtime.js && node --check src/logger.js && node --check src/preload.js && bash -n bin/dsh-electron scripts/install.sh scripts/uninstall.sh",
+    "install:desktop": "./scripts/install.sh",
+    "uninstall:desktop": "./scripts/uninstall.sh"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0"
+  }
+}

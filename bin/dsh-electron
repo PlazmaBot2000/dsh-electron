@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+#
+# Launch the DeepSeek Harness desktop shell with a system Electron.
+#
+# Preferring the distribution's Electron over a bundled copy keeps the shell a
+# thin wrapper: one less ~250 MB download and the Electron and Chromium builds
+# receive distribution security updates. Set DSH_ELECTRON_BIN to override.
+
+set -euo pipefail
+
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+find_electron() {
+  if [[ -n "${DSH_ELECTRON_BIN:-}" ]]; then
+    printf '%s\n' "$DSH_ELECTRON_BIN"
+    return 0
+  fi
+  # Highest installed version wins; glob order is not semantically sorted.
+  local candidate version best="" best_version=0
+  for candidate in /usr/lib/electron*/electron "$APP_DIR"/node_modules/electron/dist/electron; do
+    [[ -x "$candidate" ]] || continue
+    version="$(printf '%s' "$candidate" | grep -oE 'electron[0-9]+|[0-9]+\.[0-9]+\.[0-9]+' | grep -oE '[0-9]+' | head -1)"
+    [[ -n "$version" ]] || version=0
+    if (( version > best_version )); then
+      best_version="$version"
+      best="$candidate"
+    fi
+  done
+  if [[ -n "$best" ]]; then
+    printf '%s\n' "$best"
+    return 0
+  fi
+  return 1
+}
+
+ELECTRON_BIN="$(find_electron)" || {
+  echo "dsh-electron: no Electron runtime found." >&2
+  echo "dsh-electron: install one (e.g. 'sudo pacman -S electron44') or set DSH_ELECTRON_BIN." >&2
+  exit 1
+}
+
+# Pick the Ozone backend here, as a real command-line argument.
+#
+# The backend decides what draws the window frame: under native Wayland
+# Chromium draws a bare decoration of its own (a plain bar with a single close
+# button, unrelated to the desktop theme), while under X11 — through XWayland on
+# a Wayland session — the window manager decorates the window, which is the real
+# system title bar. X11 is therefore preferred on Wayland sessions.
+#
+# This must be decided before Electron starts: the platform is fixed during
+# early startup, and app.commandLine.appendSwitch() from the main script is too
+# late to change it. DSH_ELECTRON_OZONE overrides the choice (x11, wayland, or
+# empty for Chromium's own default).
+if [[ -z "${DSH_ELECTRON_OZONE:-}" && -n "${WAYLAND_DISPLAY:-}" && -n "${DISPLAY:-}" ]]; then
+  DSH_ELECTRON_OZONE=x11
+fi
+
+ARGS=()
+if [[ -n "${DSH_ELECTRON_OZONE:-}" ]]; then
+  ARGS+=("--ozone-platform=${DSH_ELECTRON_OZONE}")
+fi
+
+exec "$ELECTRON_BIN" "$APP_DIR" "${ARGS[@]}" "$@"
