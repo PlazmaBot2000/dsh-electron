@@ -400,6 +400,9 @@ function describeKind(kind) {
 /** Stop then start, used by the tray, shortcuts and error screen. */
 async function restartRuntime() {
   if (runtime === null) return startRuntime();
+  // "Restart" always means a new harness: skip the attach check once, and
+  // detach (never kill) when the current instance is somebody else's.
+  runtime.forceFresh = true;
   await runtime.stop('restart');
   runtime.stopping = false;
   runtime.restarts = 0;
@@ -480,6 +483,7 @@ function showStatus() {
     message: running ? 'Harness is running' : 'Harness is not running',
     detail: [
       `Endpoint: ${runtime?.url ?? '(none)'}`,
+      `Process: ${runtime === null ? '(none)' : runtime.attached ? 'attached — a harness this shell did not start' : 'spawned and supervised by this shell'}`,
       `Command: ${config.dshBin ?? '(not found)'}`,
       `Working directory: ${config.workingDirectory}`,
       `Log file: ${config.logFile}`,

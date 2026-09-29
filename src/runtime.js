@@ -8,12 +8,21 @@
  * printed URL carries a per-process launch token, which the harness exchanges
  * for a signed session cookie on first navigation — so the shell must read the
  * URL rather than compose one from the port.
+ *
+ * A harness the shell started outlives nothing on its own: the shell records
+ * the endpoint it was given (URL and launch token) in a small plain file, and
+ * on the next launch it re-reads that record. When the recorded port is still
+ * occupied and the saved token still authenticates, the window attaches to the
+ * running instance instead of spawning a second harness — and an attached
+ * harness is never killed when the shell quits.
  */
 
 const { EventEmitter } = require('node:events');
 const { spawn } = require('node:child_process');
 const http = require('node:http');
 const net = require('node:net');
+
+const { readEndpoint, writeEndpoint, clearEndpoint } = require('./endpoint.js');
 
 /** The harness URL line, e.g. `dsh web: http://127.0.0.1:3080/?token=...`. */
 const URL_LINE = /dsh web:\s+(https?:\/\/\S+)/;
@@ -94,13 +103,12 @@ async function choosePort(configured, host = '127.0.0.1') {
 }
 
 /**
- * Wait until the harness answers on its own URL.
+ * Fetch a URL once and report its HTTP status.
  *
- * A token-bearing index request returns either the page, a redirect to the
- * clean URL, or 401 when the token has already been exchanged. All three prove
- * the server is up; a transport error means it is not there yet.
+ * Transport failure, timeout, or a non-response all resolve to `0` so callers
+ * can tell "nothing answered" from "it answered with a status".
  */
-function probe(url, timeoutMs = 3000) {
+function probeStatus(url, timeoutMs = 3000) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (value) => {
@@ -110,15 +118,25 @@ function probe(url, timeoutMs = 3000) {
     };
     const request = http.get(url, { timeout: timeoutMs }, (response) => {
       response.resume();
-      const status = response.statusCode ?? 0;
-      done(status >= 200 && status < 500);
+      done(response.statusCode ?? 0);
     });
     request.on('timeout', () => {
       request.destroy();
-      done(false);
+      done(0);
     });
-    request.on('error', () => done(false));
+    request.on('error', () => done(0));
   });
+}
+
+/**
+ * Wait until the harness answers on its own URL.
+ *
+ * A token-bearing index request returns either the page, a redirect to the
+ * clean URL, or 401 when the token has already been exchanged. All three prove
+ * the server is up; a transport error means it is not there yet.
+ */
+function probe(url, timeoutMs = 3000) {
+  return probeStatus(url, timeoutMs).then((status) => status >= 200 && status < 500);
 }
 
 async function waitForServer(url, { attempts = 60, delayMs = 500, shouldAbort } = {}) {
@@ -149,6 +167,12 @@ class RuntimeManager extends EventEmitter {
     this.logger = logger;
     this.child = null;
     this.url = null;
+    // True when this instance adopted a running harness instead of spawning it.
+    // An attached harness is somebody else's process: never signalled, never
+    // restarted, and its endpoint record is left in place for the next launch.
+    this.attached = false;
+    // Set by the Restart action to skip the attach check for one start.
+    this.forceFresh = false;
     this.starting = false;
     this.stopping = false;
     this.restarts = 0;
@@ -157,7 +181,7 @@ class RuntimeManager extends EventEmitter {
   }
 
   get running() {
-    return this.child !== null && this.child.exitCode === null;
+    return this.attached || (this.child !== null && this.child.exitCode === null);
   }
 
   /**
@@ -207,8 +231,59 @@ class RuntimeManager extends EventEmitter {
     }
 
     this.starting = true;
-    this.startPromise = this.spawnHarness();
+    this.startPromise = this.begin();
     return this.startPromise;
+  }
+
+  /**
+   * Prefer attaching to a running harness from the endpoint record; otherwise
+   * spawn a fresh one. `forceFresh` (set by the Restart action) skips attach
+   * once, so "Restart Harness" always means "boot a new one".
+   */
+  async begin() {
+    try {
+      const url = await this.tryAttach();
+      if (url !== null) return url;
+    } catch (error) {
+      this.logger.warn('runtime', `attach check failed: ${error.message}; spawning a new harness`);
+    } finally {
+      this.forceFresh = false;
+    }
+    return this.spawnHarness();
+  }
+
+  /**
+   * Reopen the harness recorded on a previous launch, if it is still alive
+   * and the saved launch token still authenticates against it.
+   *
+   * Resolves to the authenticated URL when attached, or null when there is
+   * nothing to attach to. Only `dsh web` answers the token-bearing index URL
+   * with 2xx/3xx; 401 means a different process owns the port, and any
+   * transport error means the recorded harness is gone. Both cases fall
+   * through to a fresh spawn below.
+   */
+  async tryAttach() {
+    if (!this.config.attach || this.forceFresh) return null;
+    const record = readEndpoint(this.config.endpointFile);
+    if (record === null) return null;
+
+    const status = await probeStatus(record.url, 2000);
+    if (status >= 200 && status < 400) {
+      this.attached = true;
+      this.url = record.url;
+      this.boundPort = record.port;
+      this.logger.info('runtime', `attaching to running harness at port ${record.port}`);
+      this.starting = false;
+      this.emit('ready', record.url);
+      return record.url;
+    }
+    if (status === 401) {
+      this.logger.info('runtime', `port ${record.port} answers, but not to the saved token; starting a new harness`);
+      return null;
+    }
+    this.logger.info('runtime', `recorded harness on port ${record.port} is gone; starting a new one`);
+    clearEndpoint(this.config.endpointFile);
+    return null;
   }
 
   /** Resolve the port, then own one harness process for it. */
@@ -272,8 +347,12 @@ class RuntimeManager extends EventEmitter {
           const url = parseHarnessUrl(line);
           if (url === null) continue;
           urlSeen = true;
+          this.attached = false;
           this.url = url;
           this.logger.info('runtime', `harness endpoint: ${url}`);
+          // Save the endpoint so the next launch can reopen this very
+          // instance instead of booting a second harness.
+          writeEndpoint(this.config.endpointFile, { url });
           waitForServer(url, { shouldAbort: () => this.stopping })
             .then((alive) => {
               if (!alive && !this.stopping) {
@@ -326,6 +405,8 @@ class RuntimeManager extends EventEmitter {
         this.child = null;
         this.url = null;
         this.starting = false;
+        // The record names this child; once it is gone the record is stale.
+        clearEndpoint(this.config.endpointFile);
 
         if (!settled) {
           const failure = new RuntimeError(
@@ -373,6 +454,15 @@ class RuntimeManager extends EventEmitter {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
+    // An attached harness belongs to someone else: detach, never kill it, and
+    // keep its record so the next launch can find it again.
+    if (this.attached) {
+      this.logger.info('runtime', `detaching from foreign harness (${reason}); leaving it running`);
+      this.attached = false;
+      this.url = null;
+      this.stopping = false;
+      return Promise.resolve();
+    }
     const child = this.child;
     if (child === null || child.exitCode !== null) return Promise.resolve();
 
@@ -408,4 +498,5 @@ module.exports = {
   stripAnsi,
   waitForServer,
   probe,
+  probeStatus,
 };

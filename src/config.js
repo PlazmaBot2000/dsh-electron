@@ -7,7 +7,8 @@
  * installed `dsh` CLI and boots that CLI's own web profile, so profiles,
  * plugins, sessions, and credentials stay exactly where the CLI keeps them.
  * The handful of knobs that remain are read from the environment, which keeps
- * the shell stateless — nothing is written except the log.
+ * the shell stateless — nothing is written except the log and the one endpoint
+ * record it re-reads on the next start to attach to a running harness.
  */
 
 const fs = require('node:fs');
@@ -26,6 +27,14 @@ function dataDir() {
 
 const DATA_DIR = dataDir();
 const LOG_FILE = path.join(DATA_DIR, 'dsh-electron.log');
+
+/**
+ * Where the shell remembers the endpoint of the harness it last started:
+ * the URL and its plain launch token, written unencrypted. On the next
+ * start the shell re-reads it and, if that harness is still answering,
+ * attaches to it instead of spawning a second one.
+ */
+const ENDPOINT_FILE = path.join(DATA_DIR, 'harness-endpoint.json');
 
 /** Candidate `dsh` executables, in the order a user would expect them found. */
 function dshCandidates() {
@@ -158,6 +167,7 @@ function loadConfig() {
 
   return {
     logFile: LOG_FILE,
+    endpointFile: ENDPOINT_FILE,
     appRoot: APP_ROOT,
     dshBin,
     nodeBin,
@@ -169,6 +179,9 @@ function loadConfig() {
     // localStorage is keyed on; `choosePort` falls back to an OS-assigned free
     // port only when this one is already taken. Port 0 always asks the OS.
     port: envInt('DSH_ELECTRON_PORT', 3080),
+    // When off (`DSH_ELECTRON_ATTACH=0`) the shell never re-attaches to a
+    // running harness and always stops the one it spawned on quit.
+    attach: process.env.DSH_ELECTRON_ATTACH !== '0',
     extraArgs,
     openDevTools: process.env.DSH_ELECTRON_DEVTOOLS === '1',
     showTray: process.env.DSH_ELECTRON_TRAY !== '0',

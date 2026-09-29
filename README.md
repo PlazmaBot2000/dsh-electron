@@ -75,6 +75,7 @@ This writes a `dsh-electron` launcher into `~/.local/bin`, icons into the hicolo
 | `DSH_ELECTRON_CWD` | `~/AI_workspace`, else `~` | Working directory the harness is spawned in |
 | `DSH_ELECTRON_HOST` | `127.0.0.1` | Bind address for `dsh web` |
 | `DSH_ELECTRON_PORT` | `3080` | A stable port keeps the browser origin constant, which is what localStorage is keyed on. `0` always asks the OS |
+| `DSH_ELECTRON_ATTACH` | enabled | `0` never attaches to a still-running harness from a previous launch — always spawn a fresh one |
 | `DSH_ELECTRON_ARGS` | — | Extra arguments appended to `dsh web …` (space-separated argv, never a shell string) |
 | `DSH_ELECTRON_OZONE` | `x11` on Wayland | `x11` for real WM decorations, `wayland` for the native path |
 | `DSH_ELECTRON_BIN` | auto | Which Electron binary to run |
@@ -85,7 +86,7 @@ This writes a `dsh-electron` launcher into `~/.local/bin`, icons into the hicolo
 | `DSH_ELECTRON_SCALE` | `1` | Device scale factor forced on Chromium. The default pins it to 1:1 so the text-dense interface renders crisply instead of being blown up by the compositor; `auto` hands the choice back to the desktop, a number (`1.5`, `2`) sets it directly |
 | `XDG_CONFIG_HOME` | `~/.config` | Relocates everything the shell writes |
 
-If `DSH_ELECTRON_PORT` is already taken, the shell does not fail — it asks the OS for a free port and reads the real one back from the harness.
+On first launch that spawns a harness, the shell saves its endpoint — URL and launch token, plainly, owner-only (`0600`) — to `~/.config/dsh-electron/harness-endpoint.json`. On the next launch it re-reads that record: when the harness behind it is still running and the saved token still authenticates, the window attaches to it instead of booting a second one. An attached harness is never killed when the shell quits, and *Restart Harness* always spawns a fresh one. If the saved endpoint is gone, a new harness takes its place — and if its port is meanwhile taken by something else, the shell does not fail: it asks the OS for a free port and reads the real one back from the harness.
 
 ## License
 
