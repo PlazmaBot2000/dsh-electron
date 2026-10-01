@@ -1,6 +1,8 @@
 # Maintainer: PlazmaBot2000 <guardian9641@gmail.com>
-# Packaged from the GitHub release tarball, so a tagged version is the source
-# of truth; the checksums match the published asset byte for byte.
+# Packaged from the GitHub release tarball. The PKGBUILD ships inside that very
+# tarball, so pinning its checksum would be self-referential: the tag itself is
+# the identity and sha256sums stays SKIP. To build a published tag with a pinned
+# hash locally, run scripts/update-source.sh first.
 pkgname=dsh-electron
 pkgver=1.1.0
 pkgrel=1
@@ -15,7 +17,7 @@ depends=('electron')
 makedepends=('imagemagick')
 install="${pkgname}.install"
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
-sha256sums=('b9abbeb8bef9ff383d51eca0f9f3678c2500cff1370e1ace2d8133d4576c5cef')
+sha256sums=('SKIP')
 
 package() {
   cd "${srcdir}/${pkgname}-${pkgver}"

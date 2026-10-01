@@ -43,10 +43,11 @@ jobs:
           mkdir -p _build
           cp PKGBUILD dsh-electron.install _build/
           chown -R builder:builder "$GITHUB_WORKSPACE"
-          # -p sets $startdir to the PKGBUILD's directory, so makepkg's own
-          # src/ and pkg/ never collide with the repository's src/ tree.
-          runuser -u builder -- env HOME=/home/builder \
-            makepkg --noconfirm --nodeps -p "$GITHUB_WORKSPACE/_build/PKGBUILD"
+          # makepkg wants its PKGBUILD in the current working directory;
+          # building from _build/ also keeps makepkg's own src/ and pkg/ away
+          # from the repository's src/ tree.
+          ( cd _build && runuser -u builder -- env HOME=/home/builder \
+              makepkg --noconfirm --nodeps )
           # Publish a version-stable asset name too, so the README can show a
           # `releases/latest/download/...` one-liner that never rots.
           ( cd _build && cp dsh-electron-*.pkg.tar.zst dsh-electron-any.pkg.tar.zst )
