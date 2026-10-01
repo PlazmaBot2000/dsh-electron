@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# post_{install,upgrade} / pre_remove for the dsh-electron package.
+#
+# The files themselves live under /usr; these hooks only refresh the caches
+# desktop environments read. All of it is best-effort: a headless or minimal
+# system may not ship the cache tools, and that is not a failed transaction.
+
+post_install() {
+  _dsh_electron_update_caches
+  cat <<'EOF'
+dsh-electron: the shell boots your own `dsh` and its web profile, so the
+dsh-electron: runtime must be present separately:
+dsh-electron:   npm install -g @deepseek-ai/dsh
+dsh-electron: Start it from the application menu ("DeepSeek Harness") or run
+dsh-electron:   dsh-electron
+EOF
+}
+
+post_upgrade() {
+  _dsh_electron_update_caches
+}
+
+pre_remove() {
+  # The per-user endpoint record and log under ~/.config/dsh-electron are
+  # deliberately left alone: pacman removes system files, not user state.
+  :
+}
+
+post_remove() {
+  _dsh_electron_update_caches
+}
+
+_dsh_electron_update_caches() {
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+  fi
+  if command -v gtk4-update-icon-cache >/dev/null 2>&1; then
+    gtk4-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+  elif command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+  fi
+}

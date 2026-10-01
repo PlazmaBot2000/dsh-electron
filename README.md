@@ -52,6 +52,17 @@ npm install && npm start    # uses a local one
 
 This writes a `dsh-electron` launcher into `~/.local/bin`, icons into the hicolor theme, and a proper `.desktop` entry, so **DeepSeek Harness** appears in your application menu and dock. Undo everything with `./scripts/uninstall.sh` (your config is kept).
 
+### Install on Arch Linux
+
+Grab the prebuilt package from the GitHub releases and hand it to pacman:
+
+```bash
+wget https://github.com/PlazmaBot2000/dsh-electron/releases/latest/download/dsh-electron-any.pkg.tar.zst
+sudo pacman -U dsh-electron-any.pkg.tar.zst
+```
+
+Or build it yourself from this repository with `makepkg -si` (needs `base-devel` and `imagemagick`; the `PKGBUILD` fetches the tagged release tarball, so point `source=` at a local copy to build unpublished code). The package installs the app under `/usr/share/dsh-electron`, the `dsh-electron` launcher under `/usr/bin`, plus icons and a menu entry, and depends on your distribution's `electron`. The `dsh` runtime itself stays a separate npm global: `npm install -g @deepseek-ai/dsh`.
+
 ## Keyboard & menus
 | Shortcut | Action |
 |---|---|

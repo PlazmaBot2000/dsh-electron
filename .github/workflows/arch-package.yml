@@ -1,0 +1,60 @@
+name: arch-package
+
+# On every published GitHub release, build the Arch Linux package with makepkg
+# and attach the resulting .pkg.tar.zst to the release, so users can install it
+# with a single `pacman -U`.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  pkgbuild:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    steps:
+      # actions/checkout needs git, which the slim Arch image may not carry.
+      - name: Prepare container
+        run: pacman -Sy --noconfirm archlinux-keyring git
+
+      - uses: actions/checkout@v4
+
+      - name: Check the release tag matches pkgver
+        run: |
+          set -euo pipefail
+          want="v$(sed -n 's/^pkgver=\(.*\)$/\1/p' PKGBUILD)"
+          if [ "$want" != "$GITHUB_REF_NAME" ]; then
+            echo "PKGBUILD pkgver ($want) != release tag ($GITHUB_REF_NAME)"
+            exit 1
+          fi
+
+      - name: Install build tools
+        run: pacman -Su --noconfirm base-devel imagemagick
+
+      - name: Build package
+        run: |
+          set -euo pipefail
+          # makepkg refuses to run as root, which is the container's default user.
+          useradd -m builder
+          mkdir -p _build
+          cp PKGBUILD dsh-electron.install _build/
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          # -p sets $startdir to the PKGBUILD's directory, so makepkg's own
+          # src/ and pkg/ never collide with the repository's src/ tree.
+          runuser -u builder -- env HOME=/home/builder \
+            makepkg --noconfirm --nodeps -p "$GITHUB_WORKSPACE/_build/PKGBUILD"
+          # Publish a version-stable asset name too, so the README can show a
+          # `releases/latest/download/...` one-liner that never rots.
+          ( cd _build && cp dsh-electron-*.pkg.tar.zst dsh-electron-any.pkg.tar.zst )
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ github.workspace }}/_build/dsh-electron-*.pkg.tar.zst
+            ${{ github.workspace }}/_build/dsh-electron-any.pkg.tar.zst
+          overwrite: true

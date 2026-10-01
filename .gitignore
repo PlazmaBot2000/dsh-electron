@@ -3,3 +3,8 @@ dist/
 *.log
 .DS_Store
 *.tmp
+_build/
+pkg/
+*.pkg.tar.zst
+*.pkg.tar.xz
+*.tar.gz
