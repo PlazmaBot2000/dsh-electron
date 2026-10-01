@@ -63,6 +63,28 @@ sudo pacman -U dsh-electron-any.pkg.tar.zst
 
 Можно собрать и сами из этого репозитория через `makepkg -si` (нужны `base-devel` и `imagemagick`; `PKGBUILD` скачивает тарбол тега, поэтому для неопубликованного кода укажите в `source=` локальную копию). Пакет кладёт приложение в `/usr/share/dsh-electron`, лаунчер `dsh-electron` в `/usr/bin`, плюс иконки и пункт меню; зависимость — системный `electron`. Сам рантайм `dsh` остаётся отдельным npm-глобалом: `npm install -g @deepseek-ai/dsh`.
 
+### Установка на Nix / NixOS
+
+В репозитории лежат флейк (`flake.nix`) и отдельная деривация (`nix/package.nix`). На NixOS подключите overlay и пакет:
+
+```nix
+# ваш системный flake.nix
+inputs.dsh-electron.url = "github:PlazmaBot2000/dsh-electron";
+
+# в модуле nixpkgs для хоста:
+nixpkgs.overlays = [ dsh-electron.overlays.default ];
+environment.systemPackages = [ pkgs.dsh-electron ];
+```
+
+На любом другом дистрибутиве с Nix можно запустить или поставить напрямую:
+
+```bash
+nix run github:PlazmaBot2000/dsh-electron      # собрать и запустить
+nix profile install github:PlazmaBot2000/dsh-electron
+```
+
+Деривация берёт Electron из бинарного кэша (`electron-bin`; обычный `electron` в nixpkgs компилирует Chromium из исходников) и кладёт приложение в `$out/share/dsh-electron` с обёрнутым лаунчером `dsh-electron`, иконками и пунктом меню — как и пакет для Arch. Обёртка сама находит Nix-овские Electron и Node; рантайм `dsh` по-прежнему ищется в `PATH` — ставьте как удобно (`npm install -g @deepseek-ai/dsh` или любой пакет, дающий исполняемый `dsh`).
+
 ## Клавиатура и меню
 | Сочетание | Действие |
 |---|---|
