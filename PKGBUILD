@@ -15,7 +15,7 @@ depends=('electron')
 makedepends=('imagemagick')
 install="${pkgname}.install"
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('b9abbeb8bef9ff383d51eca0f9f3678c2500cff1370e1ace2d8133d4576c5cef')
 
 package() {
   cd "${srcdir}/${pkgname}-${pkgver}"
